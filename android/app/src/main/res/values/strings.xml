@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Q-Less</string>
+    <string name="title_activity_main">Q-Less</string>
+    <string name="package_name">cloud.qless.app</string>
+    <string name="custom_url_scheme">cloud.qless.app</string>
+</resources>
