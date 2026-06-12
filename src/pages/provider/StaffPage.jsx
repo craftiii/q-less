@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useProviderStore } from '../../store/providerStore.js'
-import { getStaff, createStaffMember, updateStaffMember } from '../../services/staffService.js'
+import {
+  getStaff, createStaffMember, updateStaffMember,
+  inviteStaffMember, suspendStaffMember, deleteStaffMember,
+} from '../../services/staffService.js'
 import { updateProvider } from '../../services/providerService.js'
 import { AppShell } from '../../components/layout/AppShell.jsx'
 import { Header } from '../../components/layout/Header.jsx'
@@ -9,6 +12,7 @@ import { Card } from '../../components/ui/Card.jsx'
 import { Button } from '../../components/ui/Button.jsx'
 import { Badge } from '../../components/ui/Badge.jsx'
 import { Spinner } from '../../components/ui/Spinner.jsx'
+import { Toast } from '../../components/ui/Toast.jsx'
 
 const COLORS = ['#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316']
 
@@ -18,11 +22,12 @@ const ASSIGNMENT_LABELS = {
   provider_assigns:'Provider weist zu',
 }
 
+// ── New staff form ──────────────────────────────────────────────────
 function StaffForm({ onSave, onCancel }) {
-  const [name, setName] = useState('')
+  const [name, setName]   = useState('')
   const [color, setColor] = useState(COLORS[0])
   const [canSelf, setCanSelf] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving]   = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -42,12 +47,9 @@ function StaffForm({ onSave, onCancel }) {
         <p className="text-xs text-gray-500 mb-2">Farbe (für Dashboard)</p>
         <div className="flex gap-2 flex-wrap">
           {COLORS.map(c => (
-            <button
-              key={c} type="button"
-              onClick={() => setColor(c)}
+            <button key={c} type="button" onClick={() => setColor(c)}
               className={`w-7 h-7 rounded-full border-2 transition-all ${color === c ? 'border-gray-800 scale-110' : 'border-transparent'}`}
-              style={{ background: c }}
-            />
+              style={{ background: c }} />
           ))}
         </div>
       </div>
@@ -66,12 +68,115 @@ function StaffForm({ onSave, onCancel }) {
   )
 }
 
+// ── Account setup modal ─────────────────────────────────────────────
+function AccountModal({ member, onClose, onSuccess }) {
+  const [mode, setMode]       = useState(null)      // null | 'create' | 'invite'
+  const [email, setEmail]     = useState('')
+  const [password, setPassword] = useState('')
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState(null)
+  const [done, setDone]       = useState(false)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      await inviteStaffMember(member.id, mode === 'invite' ? email : null, member.name, mode, password)
+      setDone(true)
+      onSuccess()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md bg-white rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="font-semibold">Account für {member.name}</p>
+          <button onClick={onClose} className="text-gray-400 text-lg">✕</button>
+        </div>
+
+        {done ? (
+          <div className="text-center py-4 space-y-2">
+            <p className="text-3xl">✅</p>
+            <p className="font-medium">
+              {mode === 'invite' ? 'Einladung verschickt!' : 'Konto erstellt!'}
+            </p>
+            {mode === 'create' && (
+              <p className="text-sm text-gray-500">
+                Zugangsdaten an {member.name} weitergeben:<br />
+                <strong>Passwort:</strong> {password}
+              </p>
+            )}
+            <Button className="w-full mt-2" onClick={onClose}>Fertig</Button>
+          </div>
+        ) : !mode ? (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">Wie soll {member.name} sich einloggen?</p>
+            <button
+              onClick={() => setMode('create')}
+              className="w-full text-left border border-gray-200 rounded-xl p-4 hover:border-blue-400 transition-colors"
+            >
+              <p className="font-medium text-sm">🔑 Benutzername + Passwort</p>
+              <p className="text-xs text-gray-500 mt-0.5">Kein E-Mail-Konto nötig. Du vergibst das Passwort und gibst es weiter.</p>
+            </button>
+            <button
+              onClick={() => setMode('invite')}
+              className="w-full text-left border border-gray-200 rounded-xl p-4 hover:border-blue-400 transition-colors"
+            >
+              <p className="font-medium text-sm">✉️ Per E-Mail einladen</p>
+              <p className="text-xs text-gray-500 mt-0.5">Mitarbeiter bekommt einen Link und setzt Passwort selbst.</p>
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <button type="button" onClick={() => setMode(null)}
+              className="text-xs text-gray-400 hover:text-gray-600">← Zurück</button>
+
+            {mode === 'invite' && (
+              <input
+                type="email" required placeholder="E-Mail-Adresse"
+                className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm"
+                value={email} onChange={e => setEmail(e.target.value)}
+              />
+            )}
+            {mode === 'create' && (
+              <div>
+                <input
+                  type="text" required placeholder="Passwort vergeben"
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm"
+                  value={password} onChange={e => setPassword(e.target.value)}
+                  minLength={8}
+                />
+                <p className="text-xs text-gray-400 mt-1">Mindestens 8 Zeichen</p>
+              </div>
+            )}
+
+            {error && <p className="text-xs text-red-500">{error}</p>}
+
+            <Button type="submit" className="w-full" disabled={saving}>
+              {saving ? <Spinner size="sm" /> : mode === 'invite' ? 'Einladung senden' : 'Konto erstellen'}
+            </Button>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ───────────────────────────────────────────────────────
 export default function StaffPage() {
   const { provider, setProvider } = useProviderStore()
-  const [staff, setStaff] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
+  const [staff, setStaff]         = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [showAdd, setShowAdd]     = useState(false)
   const [savingMode, setSavingMode] = useState(false)
+  const [accountModal, setAccountModal] = useState(null) // staff member
+  const [toast, setToast]         = useState(null)
 
   useEffect(() => {
     if (!provider) return
@@ -89,9 +194,18 @@ export default function StaffPage() {
     setStaff(prev => prev.map(x => x.id === s.id ? s : x))
   }
 
-  async function handleToggleSelfManage(member) {
-    const s = await updateStaffMember(member.id, { can_self_manage: !member.can_self_manage })
-    setStaff(prev => prev.map(x => x.id === s.id ? s : x))
+  async function handleSuspend(member) {
+    await suspendStaffMember(member.id, !member.is_suspended)
+    setStaff(prev => prev.map(x => x.id === member.id
+      ? { ...x, is_suspended: !member.is_suspended } : x))
+    setToast({ message: member.is_suspended ? 'Zugang entsperrt' : 'Zugang gesperrt', type: 'success' })
+  }
+
+  async function handleDelete(member) {
+    if (!confirm(`${member.name} wirklich löschen? Der Login wird entfernt.`)) return
+    await deleteStaffMember(member.id)
+    setStaff(prev => prev.filter(x => x.id !== member.id))
+    setToast({ message: `${member.name} gelöscht`, type: 'success' })
   }
 
   async function handleAssignmentChange(mode) {
@@ -99,6 +213,12 @@ export default function StaffPage() {
     const updated = await updateProvider(provider.id, { staff_assignment: mode })
     setProvider(updated)
     setSavingMode(false)
+  }
+
+  function inviteStatus(member) {
+    if (!member.email) return null
+    if (member.invite_status === 'accepted') return <Badge color="green">Aktiv</Badge>
+    return <Badge color="yellow">Einladung ausstehend</Badge>
   }
 
   return (
@@ -120,13 +240,10 @@ export default function StaffPage() {
           <Card className="space-y-2">
             {Object.entries(ASSIGNMENT_LABELS).map(([mode, label]) => (
               <label key={mode} className="flex items-center gap-3 cursor-pointer py-1">
-                <input
-                  type="radio" name="assignment"
+                <input type="radio" name="assignment"
                   checked={provider?.staff_assignment === mode}
                   onChange={() => handleAssignmentChange(mode)}
-                  className="accent-brand-500"
-                  disabled={savingMode}
-                />
+                  className="accent-brand-500" disabled={savingMode} />
                 <span className="text-sm text-gray-700">{label}</span>
               </label>
             ))}
@@ -155,20 +272,37 @@ export default function StaffPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm">{member.name}</p>
-                    <div className="flex gap-1 mt-0.5 flex-wrap">
+                    <div className="flex gap-1 mt-0.5 flex-wrap items-center">
                       {!member.is_active && <Badge color="gray">Inaktiv</Badge>}
-                      {member.can_self_manage && <Badge color="blue">Self-manage</Badge>}
+                      {member.is_suspended && <Badge color="red">Gesperrt</Badge>}
+                      {inviteStatus(member)}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-1 items-end shrink-0">
+                  <div className="flex flex-col gap-1 items-end shrink-0 text-xs text-gray-400">
+                    {/* Account button */}
+                    {member.invite_status !== 'accepted' ? (
+                      <button
+                        onClick={() => setAccountModal(member)}
+                        className="text-blue-500 font-medium hover:text-blue-700"
+                      >
+                        {member.email ? 'Erneut einladen' : 'Account einrichten'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleSuspend(member)}
+                        className={member.is_suspended ? 'text-green-600 hover:text-green-800' : 'hover:text-gray-600'}
+                      >
+                        {member.is_suspended ? 'Entsperren' : 'Sperren'}
+                      </button>
+                    )}
                     <button
                       onClick={() => handleToggleActive(member)}
-                      className="text-xs text-gray-400 hover:text-gray-600"
+                      className="hover:text-gray-600"
                     >{member.is_active ? 'Pausieren' : 'Aktivieren'}</button>
                     <button
-                      onClick={() => handleToggleSelfManage(member)}
-                      className="text-xs text-gray-400 hover:text-gray-600"
-                    >{member.can_self_manage ? 'Self-manage entziehen' : 'Self-manage erlauben'}</button>
+                      onClick={() => handleDelete(member)}
+                      className="text-red-400 hover:text-red-600"
+                    >Löschen</button>
                   </div>
                 </div>
               </Card>
@@ -179,6 +313,16 @@ export default function StaffPage() {
           </div>
         </div>
       </div>
+
+      {accountModal && (
+        <AccountModal
+          member={accountModal}
+          onClose={() => setAccountModal(null)}
+          onSuccess={() => getStaff(provider.id).then(setStaff)}
+        />
+      )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <BottomNav />
     </AppShell>
   )

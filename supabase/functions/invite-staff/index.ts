@@ -25,31 +25,50 @@ Deno.serve(async (req) => {
   const { data: { user } } = await callerClient.auth.getUser()
   if (!user) return new Response('Unauthorized', { status: 401 })
 
-  const { staff_id, email, name } = await req.json()
+  const { staff_id, mode, email, password, name } = await req.json()
+  // mode: 'invite' (email invite) | 'create' (internal account, no email needed)
 
-  // Verify this staff belongs to the calling provider
-  const { data: staffRow, error: staffErr } = await adminClient
+  // Verify staff belongs to calling provider
+  const { data: staffRow } = await adminClient
     .from('staff')
     .select('id, provider_id')
     .eq('id', staff_id)
     .eq('provider_id', user.id)
     .single()
 
-  if (staffErr || !staffRow) return new Response('Forbidden', { status: 403 })
+  if (!staffRow) return new Response('Forbidden', { status: 403 })
 
-  // Update email on staff record
-  await adminClient.from('staff').update({ email, invite_status: 'pending' }).eq('id', staff_id)
+  if (mode === 'invite') {
+    // Email invite flow
+    await adminClient.from('staff').update({ email, invite_status: 'pending' }).eq('id', staff_id)
 
-  // Send Supabase invite email
-  const { error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(email, {
-    data: { staff_id, role: 'staff' },
-    redirectTo: `https://qless.cloud/staff/accept-invite?staff_id=${staff_id}`,
-  })
-
-  if (inviteErr) {
-    return new Response(JSON.stringify({ error: inviteErr.message }), {
+    const { error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+      data: { staff_id, role: 'staff' },
+      redirectTo: `https://qless.cloud/staff/accept-invite?staff_id=${staff_id}`,
+    })
+    if (error) return new Response(JSON.stringify({ error: error.message }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
+
+  } else if (mode === 'create') {
+    // Internal account — generate a hidden email, set password directly
+    const internalEmail = `staff-${staff_id}@internal.qless.cloud`
+
+    const { data: newUser, error } = await adminClient.auth.admin.createUser({
+      email: internalEmail,
+      password,
+      email_confirm: true,
+      user_metadata: { staff_id, role: 'staff' },
+    })
+    if (error) return new Response(JSON.stringify({ error: error.message }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    })
+
+    // Link immediately
+    await adminClient
+      .from('staff')
+      .update({ user_id: newUser.user.id, invite_status: 'accepted', email: internalEmail })
+      .eq('id', staff_id)
   }
 
   return new Response(JSON.stringify({ ok: true }), {

@@ -52,7 +52,7 @@ export async function suspendStaffMember(staffId, suspended) {
   if (error) throw error
 }
 
-export async function inviteStaffMember(staffId, email, name) {
+export async function inviteStaffMember(staffId, email, name, mode = 'invite', password = null) {
   const { data: { session } } = await supabase.auth.getSession()
   const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/invite-staff`, {
     method: 'POST',
@@ -60,7 +60,7 @@ export async function inviteStaffMember(staffId, email, name) {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${session.access_token}`,
     },
-    body: JSON.stringify({ staff_id: staffId, email, name }),
+    body: JSON.stringify({ staff_id: staffId, email, name, mode, password }),
   })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
